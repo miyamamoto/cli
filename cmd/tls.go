@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/datarobot/cli/internal/config/viperx"
+	"github.com/datarobot/cli/internal/proxy"
 	internaltls "github.com/datarobot/cli/internal/tls"
 	"github.com/spf13/cobra"
 )
@@ -45,6 +46,18 @@ func setupTLS(cmd *cobra.Command) error {
 
 	if err := internaltls.PropagateEnv(opts); err != nil {
 		return fmt.Errorf("propagate tls env: %w", err)
+	}
+
+	// After the TLS options above: proxy.Apply clones the transport they
+	// installed, so the CA bundle and skip-verify settings are carried over.
+	proxyURL := viperx.GetString("proxy")
+
+	if err := proxy.Apply(proxyURL); err != nil {
+		return err
+	}
+
+	if err := proxy.PropagateEnv(proxyURL); err != nil {
+		return fmt.Errorf("propagate proxy env: %w", err)
 	}
 
 	return nil

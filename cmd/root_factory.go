@@ -528,6 +528,7 @@ func (f *RootFactory) registerFlags(adder *cli.CommandAdder, outputFormat *outpu
 	// Private CA / TLS flags.
 	flags.BoolP("skip-certificate-check", "k", false, "skip TLS certificate verification (insecure)")
 	flags.String("ca-cert", "", "path to a PEM-encoded CA certificate bundle")
+	flags.String("proxy", "", "forward proxy for outbound requests, e.g. http://proxy.corp:8080")
 	registerExportWindowsCertsFlag(adder.Command)
 
 	outputformat.AddPersistentFlag(adder.Command, outputFormat)
@@ -563,6 +564,7 @@ func bindViperFlags(adder *cli.CommandAdder) {
 	bindUniversalOn("verbose")
 	bindUniversalOn("skip-certificate-check")
 	bindUniversalOn("ca-cert")
+	bindUniversalOn("proxy")
 	bindUniversalOn(config.ProfileKey)
 
 	// Non-universal flags: bound to viper only (not forwarded to plugins).
