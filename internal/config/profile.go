@@ -49,6 +49,7 @@ var ProfileScopedKeys = map[string]struct{}{
 	DataRobotURL:    {},
 	DataRobotAPIKey: {},
 	"ca-cert":       {},
+	"proxy":         {},
 }
 
 // profileNamePattern is what viper can address as a dotted-path key segment:

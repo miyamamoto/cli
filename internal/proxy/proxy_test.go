@@ -27,8 +27,23 @@ import (
 
 const corpProxy = "http://proxy.corp.example:8080"
 
-// restoreDefaultTransport puts http.DefaultTransport back after a test, since
-// Apply replaces it process-wide.
+// clearProxyEnv unsets every spelling httpproxy reads. Clearing only the
+// upper-case names leaves a developer's or CI's lower-case no_proxy in force,
+// which silently changes what these tests measure.
+func clearProxyEnv(t *testing.T) {
+	t.Helper()
+
+	for _, name := range []string{
+		"HTTP_PROXY", "http_proxy",
+		"HTTPS_PROXY", "https_proxy",
+		"NO_PROXY", "no_proxy",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+// restoreDefaultTransport returns the current default transport and puts it
+// back afterwards, since Apply replaces it process-wide.
 func restoreDefaultTransport(t *testing.T) *http.Transport {
 	t.Helper()
 
@@ -70,8 +85,8 @@ func TestApplyBlankProxyLeavesTransportAlone(t *testing.T) {
 }
 
 func TestApplyRoutesBothSchemesThroughTheProxy(t *testing.T) {
+	clearProxyEnv(t)
 	restoreDefaultTransport(t)
-	t.Setenv("NO_PROXY", "")
 
 	require.NoError(t, Apply(corpProxy))
 
@@ -83,6 +98,7 @@ func TestApplyRoutesBothSchemesThroughTheProxy(t *testing.T) {
 }
 
 func TestApplyStillHonoursNoProxy(t *testing.T) {
+	clearProxyEnv(t)
 	restoreDefaultTransport(t)
 	t.Setenv("NO_PROXY", "internal.example.com")
 
@@ -93,10 +109,28 @@ func TestApplyStillHonoursNoProxy(t *testing.T) {
 	assert.NotNil(t, resolve(t, "https://app.datarobot.com/x"))
 }
 
+// NO_PROXY=* is the documented way to disable proxying globally and is common
+// in corporate shells and CI images. An earlier version probed a single host to
+// decide whether the value was usable, so this made every command fail with
+// "invalid proxy" — naming a URL that was perfectly fine.
+func TestApplyAcceptsAProxyEvenWhenNoProxyExemptsEverything(t *testing.T) {
+	for _, spelling := range []string{"NO_PROXY", "no_proxy"} {
+		t.Run(spelling, func(t *testing.T) {
+			clearProxyEnv(t)
+			restoreDefaultTransport(t)
+			t.Setenv(spelling, "*")
+
+			require.NoError(t, Apply(corpProxy),
+				"a blanket NO_PROXY is an exemption, not a malformed proxy")
+			assert.Nil(t, resolve(t, "https://app.datarobot.com/x"))
+		})
+	}
+}
+
 func TestApplyOverridesTheProxyEnvironment(t *testing.T) {
+	clearProxyEnv(t)
 	restoreDefaultTransport(t)
 	t.Setenv("HTTPS_PROXY", "http://stale.example:3128")
-	t.Setenv("NO_PROXY", "")
 
 	require.NoError(t, Apply(corpProxy))
 
@@ -105,6 +139,8 @@ func TestApplyOverridesTheProxyEnvironment(t *testing.T) {
 }
 
 func TestApplyKeepsTLSSettings(t *testing.T) {
+	clearProxyEnv(t)
+
 	base := restoreDefaultTransport(t)
 
 	// Stand in for tls.Apply having installed --ca-cert / -k before us.
@@ -121,55 +157,118 @@ func TestApplyKeepsTLSSettings(t *testing.T) {
 		"a TLS-intercepting proxy needs both settings to survive together")
 }
 
-func TestApplyRejectsAMalformedProxy(t *testing.T) {
-	// httpproxy never errors on these: it builds a nonsense URL, or resolves to
-	// no proxy at all and lets the request go out direct. Either way the user
-	// would see a confusing failure far from the value they typed.
-	for _, bad := range []string{"://not a proxy", "not a proxy", "%%%", ""} {
-		if bad == "" {
-			continue // a blank value is the documented "leave it alone" case
-		}
+func TestApplyAcceptsABareHostAndPort(t *testing.T) {
+	clearProxyEnv(t)
+	restoreDefaultTransport(t)
 
-		t.Run(bad, func(t *testing.T) {
-			restoreDefaultTransport(t)
+	require.NoError(t, Apply("proxy.corp.example:8080"),
+		"a bare host:port is what most corporate docs hand out")
+	assert.Equal(t, "proxy.corp.example:8080", resolve(t, "https://app.datarobot.com/x").Host)
+}
 
-			err := Apply(bad)
+func TestValidateRejectsUnusableValues(t *testing.T) {
+	// httpproxy reports none of these: it builds a nonsense URL, or resolves to
+	// no proxy and lets the request go out direct.
+	cases := map[string]string{
+		"not a URL":            "://not a proxy",
+		"spaces in host":       "not a proxy",
+		"bad percent-encoding": "%%%",
+		"missing colon":        "http//proxy.corp:8080",
+	}
 
-			require.Error(t, err, "%q should be rejected", bad)
-			assert.Contains(t, err.Error(), "invalid proxy")
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			assert.Error(t, Validate(value), "%q should be rejected", value)
 		})
 	}
 }
 
-func TestApplyAcceptsABareHostAndPort(t *testing.T) {
-	restoreDefaultTransport(t)
-	t.Setenv("NO_PROXY", "")
+// socks4 is a plausible thing to type and httpproxy quietly treats it as a
+// plain HTTP proxy, which fails later as a confusing protocol error.
+func TestValidateRejectsUnsupportedSchemes(t *testing.T) {
+	for _, value := range []string{"socks4://proxy.corp:1080", "ftp://proxy.corp:8080", "tcp://proxy.corp:8080"} {
+		t.Run(value, func(t *testing.T) {
+			err := Validate(value)
 
-	require.NoError(t, Apply("proxy.corp.example:8080"),
-		"a bare host:port is what most corporate docs hand out")
-
-	assert.Equal(t, "proxy.corp.example:8080", resolve(t, "https://app.datarobot.com/x").Host)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "not supported")
+		})
+	}
 }
 
-func TestPropagateEnvExportsTheProxyForPlugins(t *testing.T) {
-	t.Setenv("HTTP_PROXY", "")
-	t.Setenv("HTTPS_PROXY", "")
-	t.Setenv("http_proxy", "")
-	t.Setenv("https_proxy", "")
+func TestValidateAcceptsTheSupportedSchemes(t *testing.T) {
+	for _, value := range []string{
+		"http://proxy.corp:8080",
+		"https://proxy.corp:8443",
+		"socks5://proxy.corp:1080",
+		"socks5h://proxy.corp:1080",
+		"proxy.corp:8080",
+	} {
+		t.Run(value, func(t *testing.T) {
+			assert.NoError(t, Validate(value))
+		})
+	}
+}
+
+// The value reaches the user through `dr self config`, `dr --debug`, and any
+// error naming it — all of which end up pasted into bug reports.
+func TestRedactMasksThePassword(t *testing.T) {
+	assert.Equal(t, "http://user:xxxxx@proxy.corp:8080",
+		Redact("http://user:S3cretP%40ss@proxy.corp:8080"))
+}
+
+func TestRedactLeavesAValueWithoutCredentialsReadable(t *testing.T) {
+	assert.Equal(t, corpProxy, Redact(corpProxy),
+		"the host is what makes a proxy problem diagnosable")
+	assert.Equal(t, "proxy.corp:8080", Redact("proxy.corp:8080"))
+	assert.Equal(t, "", Redact(""))
+}
+
+func TestRedactNeverLeaksFromAnUnparseableValue(t *testing.T) {
+	out := Redact("://user:hunter2@nope")
+
+	assert.NotContains(t, out, "hunter2",
+		"a value too broken to parse must not fall through in the clear")
+}
+
+func TestApplyErrorsDoNotLeakThePassword(t *testing.T) {
+	clearProxyEnv(t)
+	restoreDefaultTransport(t)
+
+	err := Apply("socks4://user:hunter2@proxy.corp:1080")
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "hunter2")
+}
+
+func TestPropagateEnvExportsBothSpellingsForPlugins(t *testing.T) {
+	clearProxyEnv(t)
 
 	require.NoError(t, PropagateEnv(corpProxy))
 
-	assert.Equal(t, corpProxy, os.Getenv("HTTP_PROXY"))
+	// curl ignores the upper-case HTTP_PROXY for plain-http URLs, so a plugin
+	// shelling out to it would otherwise miss the proxy entirely.
+	for _, name := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"} {
+		assert.Equal(t, corpProxy, os.Getenv(name), "%s should be exported", name)
+	}
+}
+
+// Apply overrides the environment for the CLI itself; PropagateEnv has to do
+// the same for its children, or the two end up on different proxies.
+func TestPropagateEnvOverridesAStaleEnvironment(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv("HTTPS_PROXY", "http://stale.example:3128")
+
+	require.NoError(t, PropagateEnv(corpProxy))
+
 	assert.Equal(t, corpProxy, os.Getenv("HTTPS_PROXY"))
 }
 
-func TestPropagateEnvKeepsAnExistingEnvironment(t *testing.T) {
-	t.Setenv("HTTP_PROXY", "")
-	t.Setenv("http_proxy", "")
+func TestPropagateEnvBlankProxyChangesNothing(t *testing.T) {
+	clearProxyEnv(t)
 	t.Setenv("HTTPS_PROXY", "http://chosen.example:3128")
 
-	require.NoError(t, PropagateEnv(corpProxy))
+	require.NoError(t, PropagateEnv(""))
 
-	assert.Equal(t, "http://chosen.example:3128", os.Getenv("HTTPS_PROXY"),
-		"a value the user set deliberately must not be overwritten")
+	assert.Equal(t, "http://chosen.example:3128", os.Getenv("HTTPS_PROXY"))
 }

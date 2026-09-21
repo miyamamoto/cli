@@ -41,6 +41,7 @@ var PersistableKeys = map[string]struct{}{
 	"ssl_verify":               {},
 	"pulumi_config_passphrase": {},
 	"ca-cert":                  {},
+	"proxy":                    {},
 	DefaultLLMID:               {},
 }
 

@@ -160,6 +160,8 @@ Some root flags must be forwarded to plugin subprocesses as `DATAROBOT_CLI_*` en
 
 Current universal flags: `debug`, `disable-telemetry`, `verbose`, `skip-certificate-check`, `ca-cert`, `profile` (bound in `bindViperFlags`, `cmd/root_factory.go`).
 
+`--proxy` is deliberately not universal: plugins pick the proxy up from `HTTP_PROXY` / `HTTPS_PROXY`, which every runtime already honours, so a `DATAROBOT_CLI_PROXY` would only be a second copy of the value with nothing reading it.
+
 ### How it works
 
 Separation of concerns is strict:
