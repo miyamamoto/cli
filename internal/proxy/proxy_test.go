@@ -221,7 +221,7 @@ func TestRedactLeavesAValueWithoutCredentialsReadable(t *testing.T) {
 	assert.Equal(t, corpProxy, Redact(corpProxy),
 		"the host is what makes a proxy problem diagnosable")
 	assert.Equal(t, "proxy.corp:8080", Redact("proxy.corp:8080"))
-	assert.Equal(t, "", Redact(""))
+	assert.Empty(t, Redact(""))
 }
 
 func TestRedactNeverLeaksFromAnUnparseableValue(t *testing.T) {
