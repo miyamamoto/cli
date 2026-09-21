@@ -528,6 +528,7 @@ func (f *RootFactory) registerFlags(adder *cli.CommandAdder, outputFormat *outpu
 	// Private CA / TLS flags.
 	flags.BoolP("skip-certificate-check", "k", false, "skip TLS certificate verification (insecure)")
 	flags.String("ca-cert", "", "path to a PEM-encoded CA certificate bundle")
+	flags.String("proxy", "", "forward proxy for outbound requests, e.g. http://proxy.corp:8080")
 	registerExportWindowsCertsFlag(adder.Command)
 
 	outputformat.AddPersistentFlag(adder.Command, outputFormat)
@@ -575,6 +576,10 @@ func bindViperFlags(adder *cli.CommandAdder) {
 	_ = viperx.BindPFlag("plugin-update-check-interval", pflags.Lookup("plugin-update-check-interval"))
 	_ = viperx.BindPFlag("skip-plugin-update-check", pflags.Lookup("skip-plugin-update-check"))
 	_ = viperx.BindPFlag("output-format", pflags.Lookup("output-format"))
+	// Not universal: plugins get the proxy through HTTP_PROXY / HTTPS_PROXY,
+	// which every runtime already honours, so a DATAROBOT_CLI_PROXY would only
+	// be a second copy of the value for nothing to read.
+	_ = viperx.BindPFlag("proxy", pflags.Lookup("proxy"))
 }
 
 // addGroups registers the named command groups used by the help template.

@@ -24,6 +24,8 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/spf13/viper"
+
+	"github.com/datarobot/cli/internal/proxy"
 )
 
 var configFileName = "drconfig.yaml"
@@ -210,6 +212,13 @@ var sensitiveDebugKeys = map[string]struct{}{
 	"pulumi_config_passphrase": {},
 }
 
+// credentialURLDebugKeys hold URLs that may carry userinfo. Their password is
+// masked but the rest is kept: the host is what makes a proxy problem
+// diagnosable, and --debug output is exactly what users paste into bug reports.
+var credentialURLDebugKeys = map[string]struct{}{
+	"proxy": {},
+}
+
 func DebugViperConfig() (string, error) {
 	var sb strings.Builder
 
@@ -263,6 +272,13 @@ func redactSettings(m map[string]any) map[string]any {
 		if _, sensitive := sensitiveDebugKeys[key]; sensitive {
 			out[key] = "****"
 			continue
+		}
+
+		if _, isURL := credentialURLDebugKeys[key]; isURL {
+			if asString, ok := value.(string); ok {
+				out[key] = proxy.Redact(asString)
+				continue
+			}
 		}
 
 		out[key] = redactValue(value)

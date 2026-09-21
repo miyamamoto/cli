@@ -825,6 +825,28 @@ export HTTPS_PROXY=http://proxy.company.com:8080
 dr auth login
 ```
 
+Alternatively, tell the CLI directly with `--proxy`. Unlike the environment
+variables this can be persisted, so it survives across shells:
+
+```bash
+# For a single command
+dr --proxy http://proxy.company.com:8080 auth login
+
+# Or persist it to drconfig.yaml (per profile, if you use profiles)
+dr --proxy http://proxy.company.com:8080 auth set-url https://app.datarobot.com
+```
+
+`--proxy` takes precedence over `HTTP_PROXY`/`HTTPS_PROXY`, and `NO_PROXY` is
+still honoured for internal hosts. Note that Go does not read the operating
+system's proxy settings on any platform, so a proxy configured only in Windows
+Internet Settings or a PAC file has to be named here or in the environment.
+
+If the proxy needs credentials, put them in the URL
+(`http://user:pass@proxy.company.com:8080`). They are passed on to plugin
+subprocesses through the environment, and persisting them writes them to
+`drconfig.yaml` in plaintext — treat that file as a secret, as you already must
+for the API token.
+
 ### SSL certificate issues
 
 **Problem:** SSL verification fails. This can occur with:
